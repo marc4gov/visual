@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<style>
+
+.link {
+  stroke: #000;
+  stroke-width: 1.5px;
+}
+
+.node {
+  fill: #000;
+  stroke: #fff;
+  stroke-width: 1.5px;
+}
+
+</style>
+<body>
+<script src="//d3js.org/d3.v3.min.js"></script>
+<script src="https://cdn.socket.io/socket.io-1.4.5.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.0/jquery.min.js"></script>
+<script src="orientdb.js"></script>
+<script src="base64.min.js"></script>
+
+<script>
+
+var nodesV = [];
+
+var encoded = Base64.encode("admin" + ":" + "admin");
+var jsPromise = Promise.resolve($.ajax({
+    url: 'http://192.168.99.100:32770/query/testDB/sql/SELECT+EXPAND(outE().bothV())+from+Adres+where+naam=\'1300AA13\'',
+    //dataType: 'JSONP',
+    type: 'GET',
+    format: "json",
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      //'Accept-Encoding': 'gzip,deflate',
+      'Authorization': 'Basic ' + encoded
+    },
+  }));
+
+jsPromise.then(function(data) {
+  //console.log(data); // "Stuff worked!"
+      for (var i = 0; i < data.result.length; i++) {
+        nodesV[i] = data.result[i];
+        nodesV[i]['id'] = data.result[i]["@rid"];
+        console.log("V:", nodesV[i]);
+      }
+      doForceLayout(nodesV);
+}, function(err) {
+  console.log(err); // Error: "It broke"
+})
+
+
+function doForceLayout (nodesV) {
+  var width = 960,
+      height = 500;
+
+
+  var nodes = [],
+      links = [];
+
+  var force = d3.layout.force()
+      .nodes(nodes)
+      .links(links)
+      .charge(-400)
+      .linkDistance(120)
+      .size([width, height])
+      .on("tick", tick);
+
+  var svg = d3.select("body").append("svg")
+      .attr("width", width)
+      .attr("height", height);
+
+  var link = svg.selectAll(".link");
+
+  var node = svg.selectAll(".node");
+  var gnodes = svg.selectAll('g.gnode');
+  var edgelabels = svg.selectAll(".edgelabel");
+  var edgepaths = svg.selectAll(".edgepath");
+  var edges = svg.selectAll("line");
+
+  setTimeout(function() {
+        var targets, LinkIds;
+        //var a = {id: "a"}, b = {id: "b"}, c = {id: "c"};
+        for (var i = 0; i < nodesV.length; i++) { 
+          nodes.push(nodesV[i]);
+          LinkIds = getLinkIds(nodes[i]);
+
+          //console.log("LinkIds", LinkIds);
+          targets = getTargetNodes(LinkIds, nodesV);
+          console.log("Target Nodes", targets);
+
+          for (var j=0; j < targets.length; j++) {
+            //console.log("Nodes", nodes[i], targets[j]);
+            links.push({source:nodes[i], target: targets[j]});
+          }
+        //links.push({source: nodesV[0], target: nodesV[1]}, {source: nodesV[0], target: nodesV[2]}, {source: nodesV[1], target: nodesV[2]})
+          /*
+          for (var j = 0; j < LinkIds.length; j++) {
+            if (link.split("_")[0] == "out") {
+              links.push({source: nodesV[i], target: getTargetNode(targetLinkIds[j])});
+            } else {
+              links.push({source: nodesV[i], target: getTargetNode(targetLinkIds[j])});
+            }
+          }
+          */
+          
+          //links.push({source: nodesv[i], target:})
+        }
+        console.log("Inside function getForce nodesV: ", nodesV);
+        start();
+      }, 1000);
+
+  function getLinkIds(node) {
+      var link;
+      var links = {};
+      var fieldTypes = node["@fieldTypes"].split(",");
+      for (var i = 0; i < fieldTypes.length; i++) {
+        link = fieldTypes[i].split('=')[0];
+        links[link] = node[link];
+      }
+
+      return links;
+  }
+
+
+
+  function getTargetNodes(LinkIds, nodes) {
+    var foundNodes = [];
+    for (var key in LinkIds) {
+      var direction = key.split("_")[0];
+      var relation = key.split("_")[1];
+      if (direction == "out") {
+        for (var k = 0; k < LinkIds[key].length; k++) {
+          for (var i = 0; i < nodes.length; i++) {
+            var nodeLinkIDs = getLinkIds(nodes[i]);
+            for (var nodeKey in nodeLinkIDs) {
+              var direction2 = nodeKey.split("_")[0];
+              var relation2 = nodeKey.split("_")[1];
+              // if direction, relations and id match
+              if (direction2 == "in" && relation2 == relation) {
+                for (var m = 0; m < nodeLinkIDs[nodeKey].length; m++) {
+                  if (LinkIds[key][k] == nodeLinkIDs[nodeKey][m]){
+                    console.log("matching params", direction2, relation, LinkIds[key][k],nodeLinkIDs[nodeKey]);
+                    foundNodes.push(nodes[i]);                  
+                  }
+                }
+              }
+            }
+          }
+        }
+        //console.log("Key = ", key);
+      }
+    }
+    return foundNodes;
+  }
+
+  function start() {
+    var colors = d3.scale.category10();
+    //link = link.data(force.links(), function(d) { return d.source.id + "-" + d.target.id; });
+    //link.enter().insert("line", ".node").attr("class", "link");
+
+    edges = link.data(force.links(), function(d) { return d.source.id + "-" + d.target.id; })
+      .enter()
+      .append("line")
+      .attr("id",function(d,i) {return 'edge'+i})
+      .attr('marker-end','url(#arrowhead)')
+      .style("stroke","#ccc")
+      .style("pointer-events", "none");
+
+    edgepaths = link.data(force.links())
+        .enter()
+        .append('path')
+        .attr({'d': function(d) {return 'M '+d.source.x+' '+d.source.y+' L '+ d.target.x +' '+d.target.y},
+               'class':'edgepath',
+               'fill-opacity':0,
+               'stroke-opacity':0,
+               'fill':'blue',
+               'stroke':'red',
+               'id':function(d,i) {return 'edgepath'+i}})
+        .style("pointer-events", "none");
+
+
+    edgelabels = link.data(force.links(), function(d) { return d.source.id + "-" + d.target.id; })
+        .enter()
+        .append('text')
+        .style("pointer-events", "none")
+        .attr({'class':'edgelabel',
+               'id':function(d,i){return 'edgelabel'+i},
+               'dx':80,
+               'dy':0,
+               'font-size':10,
+               'fill':'#aaa'});
+
+    edgelabels.append('textPath')
+        .attr('xlink:href',function(d,i) {return '#edgepath'+i})
+        .style("pointer-events", "none")
+        .text(function(d,i){return 'label '+i});
+
+    //link.exit().remove();
+
+    gnodes = node.data(force.nodes(), function(d) { return d.id; })
+        .enter()
+        .append('g')
+        .classed('gnode', true);
+
+    gnodes.append("circle").attr("class", function(d) { return  d.id; })
+        .attr("r", 8)
+        .style("fill",function(d,i){return colors(i);})
+        .call(force.drag);
+
+    // Append the labels to each group
+    gnodes.append("text")
+        .attr("class", "word")
+        .attr("dx", ".35em")        
+        .attr("dy", ".35em")
+        .text(function(d) { 
+                console.log(d.naam);
+                return d.naam; });
+
+
+    //node = node.data(force.nodes(), function(d) { return d.id;});
+    //gnode = node.data(force.nodes(), function(d) { return d.id;});
+    /*
+ 
+    node.enter()
+        .append('g')
+        .classed('gnode', true);
+    
+    node.enter().append("circle").attr("class", function(d) { return "node " + d.id; })
+        .attr("r", 8);
+    
+    node.enter().append("text")
+    .attr("class", "word")
+    .attr("dy", ".35em")
+    .text(function(d) {
+        console.log(d.naam);
+        return d.naam;
+    });
+    */
+    //node.exit().remove();
+    
+    force.start();
+  }
+
+function tick() {
+  
+  node.attr("cx", function(d) { return d.x; })
+      .attr("cy", function(d) { return d.y; });
+  
+  edgepaths.attr('d', function(d) { var path='M '+d.source.x+' '+d.source.y+' L '+ d.target.x +' '+d.target.y;
+        return path});       
+
+  edgelabels.attr('transform',function(d,i){
+    if (d.target.x<d.source.x){
+        bbox = this.getBBox();
+        rx = bbox.x+bbox.width/2;
+        ry = bbox.y+bbox.height/2;
+                return 'rotate(180 '+rx+' '+ry+')';
+                }
+            else {
+                return 'rotate(0)';
+                }
+        });
+
+  gnodes.attr("transform", function(d) { 
+    return 'translate(' + [d.x, d.y] + ')'; 
+  });
+
+        edges.attr({"x1": function(d){return d.source.x;},
+                    "y1": function(d){return d.source.y;},
+                    "x2": function(d){return d.target.x;},
+                    "y2": function(d){return d.target.y;}
+        });
+  /*      
+  link.attr("x1", function(d) { return d.source.x; })
+      .attr("y1", function(d) { return d.source.y; })
+      .attr("x2", function(d) { return d.target.x; })
+      .attr("y2", function(d) { return d.target.y; });
+*/
+}
+
+
+}
+
+</script>
